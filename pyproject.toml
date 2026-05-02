@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "aecs-scheduler"
+version = "0.1.0"
+description = "Adaptive Event-Control Scheduler — state-aware, event-driven LR scheduling for PyTorch"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "JuiceB0xC0de" }]
+requires-python = ">=3.9"
+dependencies = ["torch>=2.0"]
+
+[project.optional-dependencies]
+hf = ["transformers>=4.30"]
+
+[project.urls]
+Homepage = "https://github.com/JuiceB0xC0de/aecs-scheduler"
