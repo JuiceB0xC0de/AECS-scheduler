@@ -1,7 +1,28 @@
 __pycache__/
+*.py[cod]
+*$py.class
 *.pyc
 *.egg-info/
 dist/
 build/
 .venv/
+.eggs/
+*.egg
 .DS_Store
+
+# Test coverage
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db

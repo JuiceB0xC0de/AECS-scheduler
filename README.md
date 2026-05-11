@@ -1,8 +1,13 @@
 # AECS — Adaptive Event-Control Scheduler
 
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/aecs-scheduler)](https://pypi.org/project/aecs-scheduler/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/JuiceB0xC0de/aecs-scheduler/main/.github/badges/tests.json)](https://github.com/JuiceB0xC0de/aecs-scheduler/actions)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+
 A state-aware, event-driven learning rate scheduler for PyTorch. Instead of following a fixed decay curve, AECS watches your training signals in real time and switches between four operating modes based on what it detects.
 
-**Benchmarked #3 out of 16 schedulers** on SST-2/DistilBERT at [juiceb0xc0de/lr-scheduler-benchmark](https://huggingface.co/spaces/juiceb0xc0de/lr-scheduler-benchmark).
+**Third place out of 25 schedulers** on SST-2/DistilBERT at [juiceb0xc0de/lr-scheduler-benchmark](https://huggingface.co/juiceb0xc0de/lr-scheduler-benchmark).
 
 ## How it works
 
@@ -95,7 +100,13 @@ AECSConfig(
 | 4 | Cosine w/ Restarts | 0.3065 | 90.48% |
 | 10 | Cosine (baseline) | 0.3533 | 90.33% |
 
-Task: SST-2 · Model: DistilBERT-base · 3 seeds · [full leaderboard](https://huggingface.co/spaces/juiceb0xc0de/lr-scheduler-benchmark)
+Task: SST-2 · Model: DistilBERT-base · 3 seeds · [full leaderboard](https://huggingface.co/juiceb0xc0de/lr-scheduler-benchmark)
+
+## Architecture
+
+![AECS Architecture](images/AECS.png)
+
+*Figure: Mode transitions and event detection logic in AECS*
 
 ## License
 
