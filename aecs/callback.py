@@ -29,6 +29,9 @@ class AECSCallback:
         self._last_grad_norm: float = 0.0
 
     def on_log(self, args, state, control, logs=None, **kwargs):
+        # HF Trainer only calls on_log every `logging_steps` (default: 500), so the
+        # scheduler is eating stale loss/grad_norm for potentially hundreds of steps
+        # between log events. If you want per-step fidelity, you're on your own.
         if logs:
             self._last_loss = float(logs.get("loss", self._last_loss))
             self._last_grad_norm = float(logs.get("grad_norm", self._last_grad_norm))

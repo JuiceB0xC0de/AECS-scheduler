@@ -56,12 +56,32 @@ class SignalBuffer:
         self.layer_grad_norms: deque = deque(maxlen=window)
         self.steps: int = 0
         self._prev_grad_flat: Optional[torch.Tensor] = None
+        self._ema_alpha: float = 0.97
+        self._ema_mu: float = 0.0
+        self._ema_var: float = 0.0
+        self._ema_initialized: bool = False
 
     def push(self, loss: float, grad_norm: float, layer_grad_norms: Optional[List[float]] = None):
         self.losses.append(loss)
         self.grad_norms.append(grad_norm)
         self.layer_grad_norms.append(layer_grad_norms or [])
         self.steps += 1
+        alpha = self._ema_alpha
+        if not self._ema_initialized:
+            # Initialize EMA with the first observed grad_norm
+            self._ema_mu = grad_norm
+            self._ema_var = 0.0
+            self._ema_initialized = True
+        else:
+            pre_mu = self._ema_mu
+            # updated mean using EMA
+            new_mu = alpha * pre_mu + (1 - alpha) * grad_norm
+            # update variance using cross-product form to account for shift in mean
+            # sigma_n^2 = alpha * sigma_{n-1}^2 + (1 - alpha) * (x_n - mu_{n-1}) * (x_n - mu_n)
+            self._ema_var = alpha * self._ema_var + (1 - alpha) * (grad_norm - pre_mu) * (
+                grad_norm - new_mu
+            )
+            self._ema_mu = new_mu
 
     def push_grad_cosine(self, grad_flat: torch.Tensor):
         if self._prev_grad_flat is not None:
@@ -76,15 +96,10 @@ class SignalBuffer:
             return float('inf')
         return min(list(self.losses)[-n:])
 
-    def grad_norm_ema(self, alpha: float = 0.97) -> Tuple[float, float]:
-        if len(self.grad_norms) == 0:
+    def grad_norm_ema(self) -> Tuple[float, float]:
+        if not self._ema_initialized:
             return 0.0, 1.0
-        mu = self.grad_norms[0]
-        var = 0.0
-        for g in list(self.grad_norms)[1:]:
-            mu = alpha * mu + (1 - alpha) * g
-            var = alpha * var + (1 - alpha) * (g - mu) ** 2
-        return mu, math.sqrt(max(var, 1e-8))
+        return self._ema_mu, math.sqrt(max(self._ema_var, 1e-8))
 
     def grad_norm_zscore(self) -> float:
         if len(self.grad_norms) < 5:
@@ -204,36 +219,27 @@ class EventControlScheduler:
         if buf.steps < cfg.event_persistence + 5:
             return None
 
-        events = []
-
         z = buf.grad_norm_zscore()
         if z > cfg.instability_z_thresh:
-            events.append("GRADIENT_SPIKE")
+            return "GRADIENT_SPIKE"
 
         recent_min = buf.loss_min_recent(n=10)
         if recent_min > 0 and buf.losses[-1] > recent_min * cfg.loss_spike_ratio:
-            events.append("LOSS_SPIKE")
-
-        redundancy = buf.redundancy_score()
-        if redundancy > cfg.redundancy_thresh:
-            events.append("REDUNDANT")
+            return "LOSS_SPIKE"
 
         grad_var = buf.grad_norm_variance()
         if grad_var > cfg.reentry_grad_norm_tol and z > 1.0:
-            events.append("UNSTABLE")
+            return "UNSTABLE"
+
+        if buf.redundancy_score() > cfg.redundancy_thresh:
+            return "REDUNDANT"
 
         if len(buf.grad_norms) >= 10:
             recent_avg = sum(list(buf.grad_norms)[-10:]) / 10
             if recent_avg < cfg.plateau_grad_norm_thresh:
-                events.append("PLATEAU")
+                return "PLATEAU"
 
-        if not events:
-            return None
-
-        for p in ["GRADIENT_SPIKE", "LOSS_SPIKE", "UNSTABLE", "REDUNDANT", "PLATEAU"]:
-            if p in events:
-                return p
-        return events[0]
+        return None
 
     def _maybe_transition(self, event: str):
         cfg = self.config
@@ -246,7 +252,6 @@ class EventControlScheduler:
                 return
             if self.mode_steps >= cfg.recovery_max_steps:
                 self._enter_mode("BASELINE", "recovery_max_duration")
-                return
 
         target = self._event_to_mode(event)
         if target == self.mode:
@@ -289,7 +294,7 @@ class EventControlScheduler:
         if step < cfg.warmup_steps:
             backbone = step / max(cfg.warmup_steps, 1)
         else:
-            progress = (step - cfg.warmup_steps) / max(cfg.total_steps - cfg.warmup_steps, 1)
+            progress = min(1.0, (step - cfg.warmup_steps) / max(cfg.total_steps - cfg.warmup_steps, 1))
             backbone = 0.5 * (1.0 + math.cos(math.pi * progress))
 
         mult = 1.0

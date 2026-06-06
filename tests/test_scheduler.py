@@ -68,6 +68,18 @@ class TestSignalBuffer:
         assert mu > 0
         assert sigma >= 0
 
+    def test_ema_mu_stable_across_window_boundary(self):
+        """EMA mu must not jump when the oldest item drops off the ring buffer."""
+        buf = SignalBuffer(window=5)
+        # Fill window with constant values so EMA is settled near 1.0
+        for _ in range(5):
+            buf.push(loss=0.0, grad_norm=1.0)
+        mu_before, _ = buf.grad_norm_ema()
+        # Push one more item (evicts oldest) with the same value — mu must not jump
+        buf.push(loss=0.0, grad_norm=1.0)
+        mu_after, _ = buf.grad_norm_ema()
+        assert abs(mu_after - mu_before) < 1e-6
+
     def test_grad_norm_zscore(self):
         """Test z-score calculation."""
         buf = SignalBuffer(window=20)
@@ -163,6 +175,23 @@ class TestEventControlScheduler:
 
         assert lr_end <= lr_mid
 
+    def test_lr_does_not_bounce_past_total_steps(self):
+        """LR must stay at floor after total_steps, not bounce back up via cos overflow."""
+        optimizer = torch.optim.AdamW([torch.nn.Parameter(torch.randn(2, 2))], lr=1e-3)
+        config = AECSConfig(warmup_steps=5, total_steps=50)
+        scheduler = EventControlScheduler(optimizer, config)
+
+        for _ in range(50):
+            scheduler.step({"loss": 1.0, "grad_norm": 0.5})
+        lr_at_end = scheduler.get_last_lr()[0]
+
+        # Running past total_steps must not increase LR
+        for _ in range(20):
+            scheduler.step({"loss": 1.0, "grad_norm": 0.5})
+        lr_past_end = scheduler.get_last_lr()[0]
+
+        assert lr_past_end <= lr_at_end + 1e-9
+
     def test_summary(self):
         """Test summary method."""
         optimizer = torch.optim.AdamW([torch.nn.Parameter(torch.randn(2, 2))], lr=1e-3)
@@ -249,3 +278,33 @@ class TestModeTransitions:
         # Check that redundancy score is high
         score = scheduler.buffer.redundancy_score()
         assert score > config.redundancy_thresh
+
+    def test_recovery_max_steps_does_not_drop_event(self):
+        """After recovery_max_steps forces BASELINE, an active event must still be processed."""
+        optimizer = torch.optim.AdamW([torch.nn.Parameter(torch.randn(2, 2))], lr=1e-3)
+        config = AECSConfig(
+            total_steps=2000,
+            instability_z_thresh=1.0,
+            cooldown_steps=0,
+            recovery_min_steps=1,
+            recovery_max_steps=5,
+        )
+        scheduler = EventControlScheduler(optimizer, config)
+
+        # Settle the buffer with normal values so EMA is stable
+        for _ in range(30):
+            scheduler.step({"loss": 1.0, "grad_norm": 1.0})
+
+        # Force into RECOVERY
+        scheduler._enter_mode("RECOVERY", "test_setup")
+        scheduler.mode_steps = 6  # past recovery_max_steps=5
+
+        # Trigger an event that would move to RECOVERY again
+        # (grad spike: push a value far above EMA to get z > 1.0)
+        scheduler.buffer.push(loss=1.0, grad_norm=50.0)
+
+        # _maybe_transition must not silently return after forcing BASELINE
+        scheduler._maybe_transition("GRADIENT_SPIKE")
+
+        # Should end up in RECOVERY, not stuck in BASELINE
+        assert scheduler.mode == "RECOVERY"
