@@ -5,9 +5,10 @@ A state-aware, event-driven training controller for PyTorch.
 
 from __future__ import annotations
 
+import itertools
 import math
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 import torch
@@ -17,6 +18,7 @@ from torch.optim import Optimizer
 @dataclass
 class AECSConfig:
     """Configuration for AECS."""
+
     base_lr: float = 5e-5
     warmup_steps: int = 500
     total_steps: int = 10000
@@ -25,9 +27,9 @@ class AECSConfig:
     grad_window: int = 50
     redundancy_window: int = 20
 
-    instability_z_thresh: float = 2.5       # ZClip-style gradient anomaly
-    loss_spike_ratio: float = 1.15          # loss > 1.15x min_recent_loss
-    redundancy_thresh: float = 0.98         # cosine similarity of grads
+    instability_z_thresh: float = 2.5  # ZClip-style gradient anomaly
+    loss_spike_ratio: float = 1.15  # loss > 1.15x min_recent_loss
+    redundancy_thresh: float = 0.98  # cosine similarity of grads
     plateau_grad_norm_thresh: float = 1e-4  # near-zero gradient norm
 
     recovery_lr_factor: float = 0.3
@@ -39,9 +41,9 @@ class AECSConfig:
     explore_lr_factor: float = 1.5
     explore_noise_std: float = 1e-5
 
-    event_persistence: int = 5              # steps signal must persist
-    cooldown_steps: int = 200               # min steps in a mode before switching
-    reentry_grad_norm_tol: float = 0.1      # grad norm variance must be < this
+    event_persistence: int = 5  # steps signal must persist
+    cooldown_steps: int = 200  # min steps in a mode before switching
+    reentry_grad_norm_tol: float = 0.1  # grad norm variance must be < this
 
     verbose: bool = True
 
@@ -61,7 +63,12 @@ class SignalBuffer:
         self._ema_var: float = 0.0
         self._ema_initialized: bool = False
 
-    def push(self, loss: float, grad_norm: float, layer_grad_norms: Optional[List[float]] = None):
+    def push(
+        self,
+        loss: float,
+        grad_norm: float,
+        layer_grad_norms: Optional[List[float]] = None,
+    ):
         self.losses.append(loss)
         self.grad_norms.append(grad_norm)
         self.layer_grad_norms.append(layer_grad_norms or [])
@@ -78,9 +85,9 @@ class SignalBuffer:
             new_mu = alpha * pre_mu + (1 - alpha) * grad_norm
             # update variance using cross-product form to account for shift in mean
             # sigma_n^2 = alpha * sigma_{n-1}^2 + (1 - alpha) * (x_n - mu_{n-1}) * (x_n - mu_n)
-            self._ema_var = alpha * self._ema_var + (1 - alpha) * (grad_norm - pre_mu) * (
-                grad_norm - new_mu
-            )
+            self._ema_var = alpha * self._ema_var + (1 - alpha) * (
+                grad_norm - pre_mu
+            ) * (grad_norm - new_mu)
             self._ema_mu = new_mu
 
     def push_grad_cosine(self, grad_flat: torch.Tensor):
@@ -93,8 +100,8 @@ class SignalBuffer:
 
     def loss_min_recent(self, n: int = 10) -> float:
         if len(self.losses) == 0:
-            return float('inf')
-        return min(list(self.losses)[-n:])
+            return float("inf")
+        return min(itertools.islice(self.losses, max(0, len(self.losses) - n), None))
 
     def grad_norm_ema(self) -> Tuple[float, float]:
         if not self._ema_initialized:
@@ -112,15 +119,13 @@ class SignalBuffer:
     def grad_norm_variance(self) -> float:
         if len(self.grad_norms) < 5:
             return 0.0
-        vals = list(self.grad_norms)
-        mean = sum(vals) / len(vals)
-        return sum((x - mean) ** 2 for x in vals) / len(vals)
+        mean = sum(self.grad_norms) / len(self.grad_norms)
+        return sum((x - mean) ** 2 for x in self.grad_norms) / len(self.grad_norms)
 
     def redundancy_score(self) -> float:
         if len(self.grad_cosines) < max(1, self.grad_cosines.maxlen // 2):
             return 0.0
-        vals = list(self.grad_cosines)
-        return sum(vals) / len(vals)
+        return sum(self.grad_cosines) / len(self.grad_cosines)
 
     def instability_score(self) -> float:
         return self.grad_norm_zscore()
@@ -171,7 +176,9 @@ class EventControlScheduler:
 
         self.base_lrs = [g["lr"] for g in optimizer.param_groups]
         self.base_betas = [g.get("betas", (0.9, 0.999)) for g in optimizer.param_groups]
-        self.base_weight_decays = [g.get("weight_decay", 0.0) for g in optimizer.param_groups]
+        self.base_weight_decays = [
+            g.get("weight_decay", 0.0) for g in optimizer.param_groups
+        ]
 
         self._loss_ema: float = 0.0
         self._loss_ema_alpha: float = 0.95
@@ -227,15 +234,22 @@ class EventControlScheduler:
         if recent_min > 0 and buf.losses[-1] > recent_min * cfg.loss_spike_ratio:
             return "LOSS_SPIKE"
 
-        grad_var = buf.grad_norm_variance()
-        if grad_var > cfg.reentry_grad_norm_tol and z > 1.0:
-            return "UNSTABLE"
+        if z > 1.0:
+            if buf.grad_norm_variance() > cfg.reentry_grad_norm_tol:
+                return "UNSTABLE"
 
         if buf.redundancy_score() > cfg.redundancy_thresh:
             return "REDUNDANT"
 
         if len(buf.grad_norms) >= 10:
-            recent_avg = sum(list(buf.grad_norms)[-10:]) / 10
+            recent_avg = (
+                sum(
+                    itertools.islice(
+                        buf.grad_norms, max(0, len(buf.grad_norms) - 10), None
+                    )
+                )
+                / 10
+            )
             if recent_avg < cfg.plateau_grad_norm_thresh:
                 return "PLATEAU"
 
@@ -266,10 +280,10 @@ class EventControlScheduler:
     def _event_to_mode(self, event: str) -> str:
         return {
             "GRADIENT_SPIKE": "RECOVERY",
-            "LOSS_SPIKE":     "RECOVERY",
-            "UNSTABLE":       "STABILIZE",
-            "REDUNDANT":      "EXPLORE",
-            "PLATEAU":        "EXPLORE",
+            "LOSS_SPIKE": "RECOVERY",
+            "UNSTABLE": "STABILIZE",
+            "REDUNDANT": "EXPLORE",
+            "PLATEAU": "EXPLORE",
         }.get(event, "BASELINE")
 
     def _enter_mode(self, new_mode: str, cause: str):
@@ -277,13 +291,15 @@ class EventControlScheduler:
         self.mode = new_mode
         self.mode_steps = 0
         self.event_counter[new_mode] += 1
-        self.transition_log.append({
-            "step": self.total_steps,
-            "from": old_mode,
-            "to": new_mode,
-            "cause": cause,
-            "lr": self.optimizer.param_groups[0]["lr"],
-        })
+        self.transition_log.append(
+            {
+                "step": self.total_steps,
+                "from": old_mode,
+                "to": new_mode,
+                "cause": cause,
+                "lr": self.optimizer.param_groups[0]["lr"],
+            }
+        )
         if self.config.verbose:
             print(f"[AECS] Step {self.total_steps}: {old_mode} -> {new_mode} ({cause})")
 
@@ -294,7 +310,10 @@ class EventControlScheduler:
         if step < cfg.warmup_steps:
             backbone = step / max(cfg.warmup_steps, 1)
         else:
-            progress = min(1.0, (step - cfg.warmup_steps) / max(cfg.total_steps - cfg.warmup_steps, 1))
+            progress = min(
+                1.0,
+                (step - cfg.warmup_steps) / max(cfg.total_steps - cfg.warmup_steps, 1),
+            )
             backbone = 0.5 * (1.0 + math.cos(math.pi * progress))
 
         mult = 1.0

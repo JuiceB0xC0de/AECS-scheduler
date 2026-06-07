@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 import torch
+
 from aecs import AECSConfig, EventControlScheduler, SignalBuffer
 
 
@@ -57,7 +58,7 @@ class TestSignalBuffer:
     def test_loss_min_recent_empty(self):
         """Test min loss with empty buffer."""
         buf = SignalBuffer(window=10)
-        assert buf.loss_min_recent(n=10) == float('inf')
+        assert buf.loss_min_recent(n=10) == float("inf")
 
     def test_grad_norm_ema(self):
         """Test EMA calculation for gradient norms."""
@@ -212,10 +213,9 @@ class TestEventControlScheduler:
         # Use dict-based param groups to ensure separate groups
         params1 = [torch.nn.Parameter(torch.randn(2, 2))]
         params2 = [torch.nn.Parameter(torch.randn(3, 3))]
-        optimizer = torch.optim.AdamW([
-            {'params': params1, 'lr': 1e-3},
-            {'params': params2, 'lr': 2e-3}
-        ])
+        optimizer = torch.optim.AdamW(
+            [{"params": params1, "lr": 1e-3}, {"params": params2, "lr": 2e-3}]
+        )
         config = AECSConfig(total_steps=100)
         scheduler = EventControlScheduler(optimizer, config)
 
@@ -248,7 +248,10 @@ class TestModeTransitions:
         scheduler.step({"loss": 1.0, "grad_norm": 10.0})
 
         # Should be in RECOVERY mode
-        assert scheduler.mode in ("RECOVERY", "BASELINE")  # May not transition yet due to cooldown
+        assert scheduler.mode in (
+            "RECOVERY",
+            "BASELINE",
+        )  # May not transition yet due to cooldown
 
     def test_redundant_triggers_explore(self):
         """Test REDUNDANT event triggers EXPLORE mode."""

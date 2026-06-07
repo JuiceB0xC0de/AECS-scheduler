@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
-from .scheduler import AECSConfig, EventControlScheduler
+from .scheduler import EventControlScheduler
 
 
 class AECSCallback:
@@ -37,7 +35,9 @@ class AECSCallback:
             self._last_grad_norm = float(logs.get("grad_norm", self._last_grad_norm))
 
     def on_step_end(self, args, state, control, **kwargs):
-        self.scheduler.step({
-            "loss": self._last_loss,
-            "grad_norm": self._last_grad_norm,
-        })
+        self.scheduler.step(
+            {
+                "loss": self._last_loss,
+                "grad_norm": self._last_grad_norm,
+            }
+        )
