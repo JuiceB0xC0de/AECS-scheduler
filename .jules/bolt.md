@@ -1,0 +1,3 @@
+## 2024-06-07 - Avoid full list conversion for deque
+**Learning:** In a heavily-called metrics buffer (`SignalBuffer`), using `list(deque)` and then slicing or computing means/sums across it creates unnecessary memory allocations and copying overhead on every training step. `deque` allows iteration directly for calculations like `sum(deque)` and using `itertools.islice` for suffix slicing, preventing the entire O(N) copy overhead when window sizes are large. Short circuiting condition checks inside `_detect_event` also marginally improves performance.
+**Action:** Use `itertools.islice` for tail elements of `deque` and direct iteration/summing over `deque` objects.
