@@ -177,7 +177,7 @@ class TestEventControlScheduler:
         assert lr_end <= lr_mid
 
     def test_lr_does_not_bounce_past_total_steps(self):
-        """LR must stay at floor after total_steps, not bounce back up via cos overflow."""
+        """LR must stay at floor after total_steps."""
         optimizer = torch.optim.AdamW([torch.nn.Parameter(torch.randn(2, 2))], lr=1e-3)
         config = AECSConfig(warmup_steps=5, total_steps=50)
         scheduler = EventControlScheduler(optimizer, config)
@@ -283,7 +283,7 @@ class TestModeTransitions:
         assert score > config.redundancy_thresh
 
     def test_recovery_max_steps_does_not_drop_event(self):
-        """After recovery_max_steps forces BASELINE, an active event must still be processed."""
+        """After max steps forces BASELINE, event must still process."""
         optimizer = torch.optim.AdamW([torch.nn.Parameter(torch.randn(2, 2))], lr=1e-3)
         config = AECSConfig(
             total_steps=2000,

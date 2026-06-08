@@ -84,7 +84,7 @@ class SignalBuffer:
             # updated mean using EMA
             new_mu = alpha * pre_mu + (1 - alpha) * grad_norm
             # update variance using cross-product form to account for shift in mean
-            # sigma_n^2 = alpha * sigma_{n-1}^2 + (1 - alpha) * (x_n - mu_{n-1}) * (x_n - mu_n)
+            # sigma_n^2 = alpha*sigma_{n-1}^2 + (1-alpha)*(x_n-mu_{n-1})*(x_n-mu_n)
             self._ema_var = alpha * self._ema_var + (1 - alpha) * (
                 grad_norm - pre_mu
             ) * (grad_norm - new_mu)
@@ -173,6 +173,7 @@ class EventControlScheduler:
         self.total_steps: int = 0
         self.event_counter: Dict[str, int] = {m: 0 for m in self.MODES}
         self.transition_log: List[Dict] = []
+        self._last_tweaked_mode: Optional[str] = None
 
         self.base_lrs = [g["lr"] for g in optimizer.param_groups]
         self.base_betas = [g.get("betas", (0.9, 0.999)) for g in optimizer.param_groups]
@@ -327,6 +328,9 @@ class EventControlScheduler:
         return [base * backbone * mult for base in self.base_lrs]
 
     def _apply_mode_tweaks(self):
+        if self.mode == self._last_tweaked_mode:
+            return
+
         cfg = self.config
         for group, base_b, base_wd in zip(
             self.optimizer.param_groups, self.base_betas, self.base_weight_decays
@@ -344,6 +348,8 @@ class EventControlScheduler:
                     group["weight_decay"] = base_wd * 1.2
                 else:
                     group["weight_decay"] = base_wd
+
+        self._last_tweaked_mode = self.mode
 
     def get_last_lr(self) -> List[float]:
         return [g["lr"] for g in self.optimizer.param_groups]

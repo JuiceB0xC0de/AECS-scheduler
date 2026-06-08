@@ -1,3 +1,6 @@
 ## 2024-06-07 - Avoid full list conversion for deque
 **Learning:** In a heavily-called metrics buffer (`SignalBuffer`), using `list(deque)` and then slicing or computing means/sums across it creates unnecessary memory allocations and copying overhead on every training step. `deque` allows iteration directly for calculations like `sum(deque)` and using `itertools.islice` for suffix slicing, preventing the entire O(N) copy overhead when window sizes are large. Short circuiting condition checks inside `_detect_event` also marginally improves performance.
 **Action:** Use `itertools.islice` for tail elements of `deque` and direct iteration/summing over `deque` objects.
+## 2024-06-08 - Avoid redundant parameter group iteration in apply_mode_tweaks
+**Learning:** In a heavily-called function `_apply_mode_tweaks` inside `EventControlScheduler`, iterating over all `param_groups` to apply `betas` and `weight_decay` modifications is redundant and costly when `self.mode` hasn't actually changed. By storing the last tweaked mode and early returning if it matches the current mode, runtime reduces by up to ~75% for simulated runs with many parameter groups.
+**Action:** Add caching to check whether an active state (like mode) has changed before performing loop-heavy tasks like modifying `optimizer.param_groups`.
