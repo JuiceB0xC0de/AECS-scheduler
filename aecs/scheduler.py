@@ -101,7 +101,9 @@ class SignalBuffer:
     def loss_min_recent(self, n: int = 10) -> float:
         if len(self.losses) == 0:
             return float("inf")
-        return min(itertools.islice(self.losses, max(0, len(self.losses) - n), None))
+        # Use reversed(deque) to slice from the right end in O(n) time
+        # rather than skipping from the left in O(N) time.
+        return min(itertools.islice(reversed(self.losses), n))
 
     def grad_norm_ema(self) -> Tuple[float, float]:
         if not self._ema_initialized:
@@ -243,14 +245,9 @@ class EventControlScheduler:
             return "REDUNDANT"
 
         if len(buf.grad_norms) >= 10:
-            recent_avg = (
-                sum(
-                    itertools.islice(
-                        buf.grad_norms, max(0, len(buf.grad_norms) - 10), None
-                    )
-                )
-                / 10
-            )
+            # Use reversed(deque) to slice from the right end in O(n) time
+            # rather than skipping from the left in O(N) time.
+            recent_avg = sum(itertools.islice(reversed(buf.grad_norms), 10)) / 10
             if recent_avg < cfg.plateau_grad_norm_thresh:
                 return "PLATEAU"
 

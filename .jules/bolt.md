@@ -4,3 +4,6 @@
 ## 2024-06-08 - Avoid redundant parameter group iteration in apply_mode_tweaks
 **Learning:** In a heavily-called function `_apply_mode_tweaks` inside `EventControlScheduler`, iterating over all `param_groups` to apply `betas` and `weight_decay` modifications is redundant and costly when `self.mode` hasn't actually changed. By storing the last tweaked mode and early returning if it matches the current mode, runtime reduces by up to ~75% for simulated runs with many parameter groups.
 **Action:** Add caching to check whether an active state (like mode) has changed before performing loop-heavy tasks like modifying `optimizer.param_groups`.
+## 2025-02-23 - deque tail slicing is O(N) when using itertools.islice from start
+**Learning:** Using `itertools.islice(deque, start, None)` to get the last `n` elements of a Python `collections.deque` takes $O(N)$ time (where $N$ is the length of the deque). In the context of large replay buffers or windows, this becomes a significant bottleneck. However, `itertools.islice(reversed(deque), n)` is $O(n)$, executing much faster because it iterates from the tail.
+**Action:** When taking a slice of the *end* of a deque, use `itertools.islice(reversed(deque), n)` to avoid traversing the entire queue from the left.
