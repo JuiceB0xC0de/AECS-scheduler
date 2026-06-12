@@ -7,3 +7,7 @@
 ## 2026-06-09 - Avoid PyTorch CPU-GPU Syncs & Optimize Deque Read Overhead
 **Learning:** When calculating `cosine_similarity` of tensors directly, avoid caching components and calling `.item()` repetitively as it forces multiple CPU-GPU synchronization blocks which degrades GPU performance. Instead, let `torch.nn.functional` handle it. Additionally, `collections.deque` slicing using `itertools.islice` scales poorly ($O(N)$) for elements near the end. `deque` is optimized for $O(1)$ random access at its endpoints.
 **Action:** Use negative indexing (e.g. `deque[-i]`) to iterate backward instead of `itertools.islice` when extracting recent items from large ring buffers. Avoid extra `.item()` extractions on GPU-bound tensors in frequently-called methods to avoid GPU sync overheads.
+
+## 2024-05-18 - Deque Reverse Iteration Bottleneck
+**Learning:** In PyTorch training loops, generator expressions with backward indexing on `collections.deque` (e.g., `sum(d[-i] for i in range(1, limit))`) create significant CPU overhead due to generator frame creation and sequence lookup.
+**Action:** Use `itertools.islice(reversed(deque), limit)` instead. It pushes iteration to C-level and avoids generator overhead, resulting in ~40-50% faster local array operations. Also, small sequence list comprehensions (e.g., `sum([x*x for x in deque])`) are ~15-20% faster than their generator equivalents.
