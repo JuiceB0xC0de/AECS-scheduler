@@ -95,7 +95,14 @@ class SignalBuffer:
                 grad_flat, self._prev_grad_flat, dim=0
             ).item()
             self.grad_cosines.append(cos)
-        self._prev_grad_flat = grad_flat.clone()
+            # Performance optimization: reuse memory via copy_ instead of clone()
+            # This avoids O(N) memory allocation overhead on every training step
+            if self._prev_grad_flat.shape == grad_flat.shape:
+                self._prev_grad_flat.copy_(grad_flat)
+            else:
+                self._prev_grad_flat = grad_flat.clone()
+        else:
+            self._prev_grad_flat = grad_flat.clone()
 
     def loss_min_recent(self, n: int = 10) -> float:
         if len(self.losses) == 0:
