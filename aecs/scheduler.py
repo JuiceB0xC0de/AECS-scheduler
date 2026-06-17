@@ -54,6 +54,9 @@ class SignalBuffer:
         self.losses: deque = deque(maxlen=window)
         self.grad_norms: deque = deque(maxlen=window)
         self.grad_cosines: deque = deque(maxlen=window)
+        self._grad_norms_sum: float = 0.0
+        self._grad_norms_sq_sum: float = 0.0
+        self._grad_cosines_sum: float = 0.0
         self.layer_grad_norms: deque = deque(maxlen=window)
         self.steps: int = 0
         self._prev_grad_flat: Optional[torch.Tensor] = None
@@ -68,8 +71,15 @@ class SignalBuffer:
         grad_norm: float,
         layer_grad_norms: Optional[List[float]] = None,
     ):
+        if len(self.grad_norms) == self.grad_norms.maxlen:
+            old = self.grad_norms[0]
+            self._grad_norms_sum -= old
+            self._grad_norms_sq_sum -= old * old
+
         self.losses.append(loss)
         self.grad_norms.append(grad_norm)
+        self._grad_norms_sum += grad_norm
+        self._grad_norms_sq_sum += grad_norm * grad_norm
         self.layer_grad_norms.append(layer_grad_norms or [])
         self.steps += 1
         alpha = self._ema_alpha
@@ -94,7 +104,10 @@ class SignalBuffer:
             cos = torch.nn.functional.cosine_similarity(
                 grad_flat, self._prev_grad_flat, dim=0
             ).item()
+            if len(self.grad_cosines) == self.grad_cosines.maxlen:
+                self._grad_cosines_sum -= self.grad_cosines[0]
             self.grad_cosines.append(cos)
+            self._grad_cosines_sum += cos
         self._prev_grad_flat = grad_flat.clone()
 
     def loss_min_recent(self, n: int = 10) -> float:
@@ -124,14 +137,15 @@ class SignalBuffer:
         if n < 5:
             return 0.0
 
-        # Performance optimization: E[x^2] - E[x]^2 is ~2.3x faster than E[(x - mean)^2]
-        mean = sum(self.grad_norms) / n
-        return max(0.0, sum(x * x for x in self.grad_norms) / n - mean * mean)
+        # Performance optimization: O(1) rolling variance instead of O(N) sum per step
+        mean = self._grad_norms_sum / n
+        return max(0.0, self._grad_norms_sq_sum / n - mean * mean)
 
     def redundancy_score(self) -> float:
         if len(self.grad_cosines) < max(1, self.grad_cosines.maxlen // 2):
             return 0.0
-        return sum(self.grad_cosines) / len(self.grad_cosines)
+        # Performance optimization: cache the sum to avoid O(N) evaluation on every step
+        return self._grad_cosines_sum / len(self.grad_cosines)
 
     def instability_score(self) -> float:
         return self.grad_norm_zscore()
