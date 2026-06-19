@@ -102,9 +102,15 @@ class SignalBuffer:
             return float("inf")
 
         # Performance optimization: backward indexing is much faster
-        # than itertools.islice on deque
+        # than itertools.islice on deque, and a manual loop is faster
+        # than a generator expression
         limit = min(n, len(self.losses))
-        return min(self.losses[-i] for i in range(1, limit + 1))
+        m = self.losses[-1]
+        for i in range(2, limit + 1):
+            val = self.losses[-i]
+            if val < m:
+                m = val
+        return m
 
     def grad_norm_ema(self) -> Tuple[float, float]:
         if not self._ema_initialized:
@@ -125,8 +131,15 @@ class SignalBuffer:
             return 0.0
 
         # Performance optimization: E[x^2] - E[x]^2 is ~2.3x faster than E[(x - mean)^2]
-        mean = sum(self.grad_norms) / n
-        return max(0.0, sum(x * x for x in self.grad_norms) / n - mean * mean)
+        # Using a single loop avoids generator overhead and two passes over the deque.
+        s = 0.0
+        s2 = 0.0
+        for x in self.grad_norms:
+            s += x
+            s2 += x * x
+        mean = s / n
+        v = s2 / n - mean * mean
+        return v if v > 0.0 else 0.0
 
     def redundancy_score(self) -> float:
         if len(self.grad_cosines) < max(1, self.grad_cosines.maxlen // 2):
@@ -250,9 +263,12 @@ class EventControlScheduler:
 
         if len(buf.grad_norms) >= 10:
             # Performance optimization: backward indexing is much faster
-            # than itertools.islice on deque
-            recent_avg = sum(buf.grad_norms[-i] for i in range(1, 11)) / 10
-            if recent_avg < cfg.plateau_grad_norm_thresh:
+            # than itertools.islice on deque, and a manual loop avoids
+            # generator overhead.
+            s = 0.0
+            for i in range(1, 11):
+                s += buf.grad_norms[-i]
+            if s / 10 < cfg.plateau_grad_norm_thresh:
                 return "PLATEAU"
 
         return None
