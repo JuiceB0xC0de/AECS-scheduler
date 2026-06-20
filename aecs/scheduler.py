@@ -93,7 +93,7 @@ class SignalBuffer:
         if self._prev_grad_flat is not None:
             cos = torch.nn.functional.cosine_similarity(
                 grad_flat, self._prev_grad_flat, dim=0
-            ).item()
+            )
             self.grad_cosines.append(cos)
         self._prev_grad_flat = grad_flat.clone()
 
@@ -102,9 +102,14 @@ class SignalBuffer:
             return float("inf")
 
         # Performance optimization: backward indexing is much faster
-        # than itertools.islice on deque
+        # than itertools.islice on deque. Manual loop avoids generator overhead.
         limit = min(n, len(self.losses))
-        return min(self.losses[-i] for i in range(1, limit + 1))
+        m = self.losses[-1]
+        for i in range(2, limit + 1):
+            v = self.losses[-i]
+            if v < m:
+                m = v
+        return m
 
     def grad_norm_ema(self) -> Tuple[float, float]:
         if not self._ema_initialized:
@@ -124,14 +129,22 @@ class SignalBuffer:
         if n < 5:
             return 0.0
 
-        # Performance optimization: E[x^2] - E[x]^2 is ~2.3x faster than E[(x - mean)^2]
-        mean = sum(self.grad_norms) / n
-        return max(0.0, sum(x * x for x in self.grad_norms) / n - mean * mean)
+        # Performance optimization: E[x^2] - E[x]^2 is ~2.3x faster
+        # than E[(x - mean)^2]. Manual loop avoids generator overhead.
+        s = 0.0
+        sq_sum = 0.0
+        for x in self.grad_norms:
+            s += x
+            sq_sum += x * x
+        mean = s / n
+        return max(0.0, sq_sum / n - mean * mean)
 
     def redundancy_score(self) -> float:
         if len(self.grad_cosines) < max(1, self.grad_cosines.maxlen // 2):
             return 0.0
-        return sum(self.grad_cosines) / len(self.grad_cosines)
+        # Performance optimization: Stack tensors and mean instead of using python sum
+        # for a single-kernel reduction and delayed CPU-GPU sync.
+        return torch.stack(list(self.grad_cosines)).mean().item()
 
     def instability_score(self) -> float:
         return self.grad_norm_zscore()
@@ -250,8 +263,11 @@ class EventControlScheduler:
 
         if len(buf.grad_norms) >= 10:
             # Performance optimization: backward indexing is much faster
-            # than itertools.islice on deque
-            recent_avg = sum(buf.grad_norms[-i] for i in range(1, 11)) / 10
+            # than itertools.islice on deque. Manual loop avoids generator overhead.
+            s = 0.0
+            for i in range(1, 11):
+                s += buf.grad_norms[-i]
+            recent_avg = s / 10
             if recent_avg < cfg.plateau_grad_norm_thresh:
                 return "PLATEAU"
 
