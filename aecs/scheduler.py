@@ -101,10 +101,15 @@ class SignalBuffer:
         if len(self.losses) == 0:
             return float("inf")
 
-        # Performance optimization: backward indexing is much faster
-        # than itertools.islice on deque
+        # Performance optimization: manual backward indexing loop is faster
+        # than generator expression
         limit = min(n, len(self.losses))
-        return min(self.losses[-i] for i in range(1, limit + 1))
+        min_val = self.losses[-1]
+        for i in range(2, limit + 1):
+            val = self.losses[-i]
+            if val < min_val:
+                min_val = val
+        return min_val
 
     def grad_norm_ema(self) -> Tuple[float, float]:
         if not self._ema_initialized:
@@ -124,9 +129,15 @@ class SignalBuffer:
         if n < 5:
             return 0.0
 
-        # Performance optimization: E[x^2] - E[x]^2 is ~2.3x faster than E[(x - mean)^2]
-        mean = sum(self.grad_norms) / n
-        return max(0.0, sum(x * x for x in self.grad_norms) / n - mean * mean)
+        # Performance optimization: manual loop for sum and sum_squares
+        # is faster than generator expression and built-in sum
+        s = 0.0
+        s_sq = 0.0
+        for x in self.grad_norms:
+            s += x
+            s_sq += x * x
+        mean = s / n
+        return max(0.0, s_sq / n - mean * mean)
 
     def redundancy_score(self) -> float:
         if len(self.grad_cosines) < max(1, self.grad_cosines.maxlen // 2):
@@ -249,9 +260,12 @@ class EventControlScheduler:
             return "REDUNDANT"
 
         if len(buf.grad_norms) >= 10:
-            # Performance optimization: backward indexing is much faster
-            # than itertools.islice on deque
-            recent_avg = sum(buf.grad_norms[-i] for i in range(1, 11)) / 10
+            # Performance optimization: manual backward indexing loop is faster
+            # than generator expression
+            recent_sum = 0.0
+            for i in range(1, 11):
+                recent_sum += buf.grad_norms[-i]
+            recent_avg = recent_sum / 10
             if recent_avg < cfg.plateau_grad_norm_thresh:
                 return "PLATEAU"
 
