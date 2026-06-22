@@ -102,9 +102,15 @@ class SignalBuffer:
             return float("inf")
 
         # Performance optimization: backward indexing is much faster
-        # than itertools.islice on deque
+        # than itertools.islice on deque. Avoiding generator expressions
+        # inside built-in functions speeds up hot paths.
         limit = min(n, len(self.losses))
-        return min(self.losses[-i] for i in range(1, limit + 1))
+        m = float("inf")
+        for i in range(1, limit + 1):
+            val = self.losses[-i]
+            if val < m:
+                m = val
+        return m
 
     def grad_norm_ema(self) -> Tuple[float, float]:
         if not self._ema_initialized:
@@ -250,8 +256,12 @@ class EventControlScheduler:
 
         if len(buf.grad_norms) >= 10:
             # Performance optimization: backward indexing is much faster
-            # than itertools.islice on deque
-            recent_avg = sum(buf.grad_norms[-i] for i in range(1, 11)) / 10
+            # than itertools.islice on deque. Avoiding generator expressions
+            # inside built-in functions speeds up hot paths.
+            recent_sum = 0.0
+            for i in range(1, 11):
+                recent_sum += buf.grad_norms[-i]
+            recent_avg = recent_sum / 10
             if recent_avg < cfg.plateau_grad_norm_thresh:
                 return "PLATEAU"
 
