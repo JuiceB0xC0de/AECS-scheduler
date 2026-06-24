@@ -7,3 +7,11 @@
 ## 2026-06-09 - Avoid PyTorch CPU-GPU Syncs & Optimize Deque Read Overhead
 **Learning:** When calculating `cosine_similarity` of tensors directly, avoid caching components and calling `.item()` repetitively as it forces multiple CPU-GPU synchronization blocks which degrades GPU performance. Instead, let `torch.nn.functional` handle it. Additionally, `collections.deque` slicing using `itertools.islice` scales poorly ($O(N)$) for elements near the end. `deque` is optimized for $O(1)$ random access at its endpoints.
 **Action:** Use negative indexing (e.g. `deque[-i]`) to iterate backward instead of `itertools.islice` when extracting recent items from large ring buffers. Avoid extra `.item()` extractions on GPU-bound tensors in frequently-called methods to avoid GPU sync overheads.
+
+## 2026-06-24 - Defer .item() extraction on PyTorch tensors
+**Learning:** Extracting  from PyTorch tensors forces a CPU-GPU sync, which stalls the execution pipeline if called frequently in loops (like adding gradients to a deque). Storing 0-dimensional tensors directly in the deque and deferring  extraction until absolutely needed prevents immediate synchronization.
+**Action:** Avoid calling  when storing tensors in buffers. Use  when the value is needed later to compute results efficiently on the GPU instead of sequentially calling .
+
+## 2026-06-24 - Defer item extraction on PyTorch tensors
+**Learning:** Extracting item from PyTorch tensors forces a CPU-GPU sync, which stalls the execution pipeline if called frequently in loops. Storing 0-dimensional tensors directly in the deque and deferring item extraction until absolutely needed prevents immediate synchronization.
+**Action:** Avoid calling item when storing tensors in buffers. Use torch.stack mean item when the value is needed later to compute results efficiently on the GPU instead of sequentially calling sum.
