@@ -275,8 +275,8 @@ class TestModeTransitions:
             scheduler.mode_steps += 1
 
         # Force redundancy check
-        scheduler.buffer.grad_cosines.append(0.99)  # Very redundant
-        scheduler.buffer.grad_cosines.append(0.98)
+        scheduler.buffer.grad_cosines.append(torch.tensor(0.99))  # Very redundant
+        scheduler.buffer.grad_cosines.append(torch.tensor(0.98))
 
         # Check that redundancy score is high
         score = scheduler.buffer.redundancy_score()

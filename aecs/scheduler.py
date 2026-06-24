@@ -93,7 +93,8 @@ class SignalBuffer:
         if self._prev_grad_flat is not None:
             cos = torch.nn.functional.cosine_similarity(
                 grad_flat, self._prev_grad_flat, dim=0
-            ).item()
+            )
+            # Performance optimization: Defer .item() to avoid immediate CPU-GPU sync
             self.grad_cosines.append(cos)
         self._prev_grad_flat = grad_flat.clone()
 
@@ -131,7 +132,9 @@ class SignalBuffer:
     def redundancy_score(self) -> float:
         if len(self.grad_cosines) < max(1, self.grad_cosines.maxlen // 2):
             return 0.0
-        return sum(self.grad_cosines) / len(self.grad_cosines)
+        # Performance optimization: use torch.stack().mean() instead of sum()
+        # to avoid sequentially dispatching GPU kernels for tensor reduction.
+        return torch.stack(list(self.grad_cosines)).mean().item()
 
     def instability_score(self) -> float:
         return self.grad_norm_zscore()
