@@ -7,3 +7,6 @@
 ## 2026-06-09 - Avoid PyTorch CPU-GPU Syncs & Optimize Deque Read Overhead
 **Learning:** When calculating `cosine_similarity` of tensors directly, avoid caching components and calling `.item()` repetitively as it forces multiple CPU-GPU synchronization blocks which degrades GPU performance. Instead, let `torch.nn.functional` handle it. Additionally, `collections.deque` slicing using `itertools.islice` scales poorly ($O(N)$) for elements near the end. `deque` is optimized for $O(1)$ random access at its endpoints.
 **Action:** Use negative indexing (e.g. `deque[-i]`) to iterate backward instead of `itertools.islice` when extracting recent items from large ring buffers. Avoid extra `.item()` extractions on GPU-bound tensors in frequently-called methods to avoid GPU sync overheads.
+## 2024-06-28 - PyTorch Tensors vs Floats in Test Suites
+**Learning:** PyTorch test suites (like `test_scheduler.py` in this repo) often inject raw Python floats into buffers that contain PyTorch Tensors in production. When applying batch PyTorch tensor operations (like `torch.stack`), we must gracefully handle these mixed types to avoid breaking tests.
+**Action:** When performing tensor aggregations over a buffer, check for the presence of tensors. If present, ensure all elements (including injected floats) are converted to tensors on the same device before stacking or reducing.
