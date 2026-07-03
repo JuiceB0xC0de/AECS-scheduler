@@ -93,9 +93,9 @@ class SignalBuffer:
         if self._prev_grad_flat is not None:
             cos = torch.nn.functional.cosine_similarity(
                 grad_flat, self._prev_grad_flat, dim=0
-            ).item()
+            ).detach()
             self.grad_cosines.append(cos)
-        self._prev_grad_flat = grad_flat.clone()
+        self._prev_grad_flat = grad_flat.detach().clone()
 
     def loss_min_recent(self, n: int = 10) -> float:
         if len(self.losses) == 0:
@@ -131,6 +131,22 @@ class SignalBuffer:
     def redundancy_score(self) -> float:
         if len(self.grad_cosines) < max(1, self.grad_cosines.maxlen // 2):
             return 0.0
+
+        # Performance optimization: defer single-element .item() calls and
+        # use torch.stack().mean() to run reduction in a single GPU kernel
+        # instead of sequentially dispatching kernels with Python's sum()
+        if any(isinstance(x, torch.Tensor) for x in self.grad_cosines):
+            # Gracefully handle mixed float/Tensor lists from test suite injections
+            device = next(
+                (x.device for x in self.grad_cosines if isinstance(x, torch.Tensor)),
+                None,
+            )
+            tensors = [
+                x if isinstance(x, torch.Tensor) else torch.tensor(x, device=device)
+                for x in self.grad_cosines
+            ]
+            return torch.stack(tensors).mean().item()
+
         return sum(self.grad_cosines) / len(self.grad_cosines)
 
     def instability_score(self) -> float:
